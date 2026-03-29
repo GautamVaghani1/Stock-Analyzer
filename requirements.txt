@@ -1,0 +1,6 @@
+openai==1.59.3
+streamlit==1.41.1
+yfinance==0.2.51
+pandas==2.2.3
+requests
+urllib3
