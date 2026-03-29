@@ -75,42 +75,24 @@ class AgenticFinancialAnalyzer:
         return all_news
 
     # ==========================================================================
-    # TICKER ZERO-ERROR RESOLVER
+    # TICKER FORMAT SANITY CHECK (No live requests needed)
     # ==========================================================================
-    def agent2_5_verify_ticker(self, company_name, ticker_guess, market):
-        """Zero-Error Ticker Resolver: Uses Yahoo Search API + Live Data Check to guarantee a working ticker."""
-        candidates = []
-        
-        try:
-            url = f"https://query2.finance.yahoo.com/v1/finance/search?q={urllib.parse.quote(company_name)}&quotesCount=5&newsCount=0"
-            req = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0'})
-            with urllib.request.urlopen(req, timeout=5) as response:
-                data = json.loads(response.read())
-            
-            quotes = data.get('quotes', [])
-            for q in quotes:
-                if q.get('quoteType') == 'EQUITY':
-                    candidates.append(q.get('symbol'))
-        except Exception:
-            pass
-            
-        # Add LLM's guess to candidates just in case
-        if ticker_guess and ticker_guess not in candidates:
-            candidates.append(ticker_guess)
-            
-        # Strict logic to find the single best match WITHOUT hitting yf.Ticker limits!
-        for sym in candidates:
-            if not sym: continue
-            if market == "India" and (sym.endswith('.NS') or sym.endswith('.BO')):
-                return sym
-            if market == "US" and '.' not in sym:
-                return sym
-                
-        # If strict regional matching failed, just return the exact first equity found natively
-        for sym in candidates:
-            if sym: return sym
-                
-        return None
+    def agent2_5_sanitize_ticker(self, ticker_guess, market):
+        """Pure format check - no live requests, no 429s. Just validates the LLM output shape."""
+        if not ticker_guess or len(ticker_guess) < 1:
+            return None
+        t = ticker_guess.strip().upper()
+        # Reject clearly wrong outputs (full words like "NEXSTAR", bare suffixes like "NS")
+        if len(t) > 10:
+            return None
+        if market == "India":
+            # Must have a company prefix before .NS or .BO
+            if '.' not in t:
+                return None
+            prefix = t.split('.')[0]
+            if len(prefix) < 2:
+                return None  # Bare "NS" or "BO" rejected
+        return t
 
     # ==========================================================================
     # PHASE 2: Market Filter & Top 5 Selection (Agent 2)
@@ -153,22 +135,20 @@ class AgenticFinancialAnalyzer:
             )
             data = json.loads(response.choices[0].message.content)
             top_5 = data.get("top_5", [])
-            print("  -> Top 5 Events Identified. Entering Zero-Error Ticker Verification Phase:")
+            print("  -> Top 5 Events Identified. Running Ticker Format Sanity Check:")
             
-            # Run Mathematical Ticker Resolver loop replacing LLM hallucination
             verified_top_5 = []
             for e in top_5:
                 guess = e.get('ticker')
-                c_name = e.get('company_name', guess)
                 mkt = e.get('market')
                 
-                real_ticker = self.agent2_5_verify_ticker(c_name, guess, mkt)
-                if real_ticker:
-                    e['ticker'] = real_ticker
+                clean = self.agent2_5_sanitize_ticker(guess, mkt)
+                if clean:
+                    e['ticker'] = clean
                     verified_top_5.append(e)
-                    print(f"     ✅ [{real_ticker}] safely verified for {c_name} -> {e.get('event_type')}")
+                    print(f"     ✅ [{clean}] format OK -> {e.get('event_type')}")
                 else:
-                    print(f"     ❌ Dropped {c_name}: Could not verify ticker mathematically. Preventing crash.")
+                    print(f"     ❌ Dropped bad ticker '{guess}' for market {mkt}")
                     
             return verified_top_5
         except Exception as e:
