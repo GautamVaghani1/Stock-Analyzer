@@ -6,6 +6,8 @@ from datetime import datetime, timedelta
 import pandas as pd
 import yfinance as yf
 import xml.etree.ElementTree as ET
+import time
+import requests
 
 try:
     from openai import OpenAI
@@ -38,6 +40,13 @@ class AgenticFinancialAnalyzer:
         self.client = OpenAI(api_key=api_key_to_use)
         self.fast_model = "gpt-4o-mini"
         self.reasoning_model = "gpt-4o"
+        
+        # Yahoo Finance Anti-Bot Evasion Session
+        self.yf_session = requests.Session()
+        self.yf_session.headers.update({
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/115.0.0.0 Safari/537.36",
+            "Accept": "*/*"
+        })
 
     # ==========================================================================
     # PHASE 1: Real-time News (Agent 1)
@@ -104,7 +113,8 @@ class AgenticFinancialAnalyzer:
                 
             try:
                 # Built-in fast check bypassing heavy .info 429 blockades
-                if not yf.Ticker(sym).history(period="5d").empty:
+                time.sleep(1) # Delay to defeat bot-blockers
+                if not yf.Ticker(sym, session=self.yf_session).history(period="5d").empty:
                     return sym
             except Exception:
                 continue
@@ -113,7 +123,8 @@ class AgenticFinancialAnalyzer:
         for sym in candidates:
             if not sym: continue
             try:
-                if not yf.Ticker(sym).history(period="5d").empty:
+                time.sleep(1)
+                if not yf.Ticker(sym, session=self.yf_session).history(period="5d").empty:
                     return sym
             except Exception:
                 continue
@@ -252,7 +263,9 @@ class AgenticFinancialAnalyzer:
     def calculate_market_metrics(self, ticker, event_objects):
         """Calculates 1-Month Baseline (Excluding T-1/T-2), T-1/T-2 hype, and True Post-News movement."""
         print(f"[Agent 4/5] 📈 Calculating percentage deviations (Excluding T-1, T-2) for {ticker}...")
-        stock = yf.Ticker(ticker)
+        
+        time.sleep(1) # Strict Yahoo Rate Limit Evasion
+        stock = yf.Ticker(ticker, session=self.yf_session)
         hist = stock.history(period="2y")
         if hist.empty: return []
             
@@ -310,7 +323,8 @@ class AgenticFinancialAnalyzer:
         """Calculates the Pre-Event hype (T-1 & T-2) and 1-month baseline ending right now."""
         print(f"[Agent 4/5] ⏱️  Calculating Current Market T-1/T-2 hype for {ticker}...")
         try:
-            stock = yf.Ticker(ticker)
+            time.sleep(1)
+            stock = yf.Ticker(ticker, session=self.yf_session)
             hist = stock.history(period="3mo")
             if len(hist) < 25: return {}
                 
@@ -344,19 +358,21 @@ class AgenticFinancialAnalyzer:
         
         try:
             # 1. Broad Market Trend
-            idx_hist = yf.Ticker(index_ticker).history(period="1mo")
+            time.sleep(1)
+            idx_hist = yf.Ticker(index_ticker, session=self.yf_session).history(period="1mo")
             index_trend_pct = 0
             if not idx_hist.empty:
                 start = idx_hist.iloc[0]["Close"]
                 end = idx_hist.iloc[-1]["Close"]
                 index_trend_pct = round(((end - start) / start) * 100, 2)
                 
-            # 2. Company Info (Pricing calculated via history to bypass heavy .info 429 blocks)
+            # 2. Company Info
             curr_price = 0
             high_52 = 0
             low_52 = 0
             try:
-                hist_1y = yf.Ticker(ticker).history(period="1y")
+                time.sleep(1)
+                hist_1y = yf.Ticker(ticker, session=self.yf_session).history(period="1y")
                 if not hist_1y.empty:
                     curr_price = round(float(hist_1y.iloc[-1]["Close"]), 2)
                     high_52 = round(float(hist_1y["High"].max()), 2)
