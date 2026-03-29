@@ -40,13 +40,6 @@ class AgenticFinancialAnalyzer:
         self.client = OpenAI(api_key=api_key_to_use)
         self.fast_model = "gpt-4o-mini"
         self.reasoning_model = "gpt-4o"
-        
-        # Yahoo Finance Anti-Bot Evasion Session
-        self.yf_session = requests.Session()
-        self.yf_session.headers.update({
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/115.0.0.0 Safari/537.36",
-            "Accept": "*/*"
-        })
 
     # ==========================================================================
     # PHASE 1: Real-time News (Agent 1)
@@ -105,29 +98,17 @@ class AgenticFinancialAnalyzer:
         if ticker_guess and ticker_guess not in candidates:
             candidates.append(ticker_guess)
             
-        # Strict validation loop (prioritize proper market suffix)
+        # Strict logic to find the single best match WITHOUT hitting yf.Ticker limits!
         for sym in candidates:
             if not sym: continue
-            if market == "India" and not (sym.endswith('.NS') or sym.endswith('.BO')): continue
-            if market == "US" and '.' in sym: continue
+            if market == "India" and (sym.endswith('.NS') or sym.endswith('.BO')):
+                return sym
+            if market == "US" and '.' not in sym:
+                return sym
                 
-            try:
-                # Built-in fast check bypassing heavy .info 429 blockades
-                time.sleep(1) # Delay to defeat bot-blockers
-                if not yf.Ticker(sym, session=self.yf_session).history(period="5d").empty:
-                    return sym
-            except Exception:
-                continue
-                
-        # If strict regional matching failed, just check if ANY candidate works at all
+        # If strict regional matching failed, just return the exact first equity found natively
         for sym in candidates:
-            if not sym: continue
-            try:
-                time.sleep(1)
-                if not yf.Ticker(sym, session=self.yf_session).history(period="5d").empty:
-                    return sym
-            except Exception:
-                continue
+            if sym: return sym
                 
         return None
 
@@ -263,9 +244,8 @@ class AgenticFinancialAnalyzer:
     def calculate_market_metrics(self, ticker, event_objects):
         """Calculates 1-Month Baseline (Excluding T-1/T-2), T-1/T-2 hype, and True Post-News movement."""
         print(f"[Agent 4/5] 📈 Calculating percentage deviations (Excluding T-1, T-2) for {ticker}...")
-        
         time.sleep(1) # Strict Yahoo Rate Limit Evasion
-        stock = yf.Ticker(ticker, session=self.yf_session)
+        stock = yf.Ticker(ticker)
         hist = stock.history(period="2y")
         if hist.empty: return []
             
@@ -324,7 +304,7 @@ class AgenticFinancialAnalyzer:
         print(f"[Agent 4/5] ⏱️  Calculating Current Market T-1/T-2 hype for {ticker}...")
         try:
             time.sleep(1)
-            stock = yf.Ticker(ticker, session=self.yf_session)
+            stock = yf.Ticker(ticker)
             hist = stock.history(period="3mo")
             if len(hist) < 25: return {}
                 
@@ -359,7 +339,7 @@ class AgenticFinancialAnalyzer:
         try:
             # 1. Broad Market Trend
             time.sleep(1)
-            idx_hist = yf.Ticker(index_ticker, session=self.yf_session).history(period="1mo")
+            idx_hist = yf.Ticker(index_ticker).history(period="1mo")
             index_trend_pct = 0
             if not idx_hist.empty:
                 start = idx_hist.iloc[0]["Close"]
@@ -372,7 +352,7 @@ class AgenticFinancialAnalyzer:
             low_52 = 0
             try:
                 time.sleep(1)
-                hist_1y = yf.Ticker(ticker, session=self.yf_session).history(period="1y")
+                hist_1y = yf.Ticker(ticker).history(period="1y")
                 if not hist_1y.empty:
                     curr_price = round(float(hist_1y.iloc[-1]["Close"]), 2)
                     high_52 = round(float(hist_1y["High"].max()), 2)
