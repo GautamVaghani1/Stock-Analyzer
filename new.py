@@ -23,10 +23,19 @@ class AgenticFinancialAnalyzer:
     def __init__(self):
         if not OPENAI_AVAILABLE:
             raise ImportError("OpenAI library not found. Please run: pip install openai")
-        if not OPENAI_API_KEY:
-            raise ValueError("OPENAI_API_KEY is not set.")
             
-        self.client = OpenAI(api_key=OPENAI_API_KEY)
+        api_key_to_use = OPENAI_API_KEY
+        try:
+            import streamlit as st
+            if not api_key_to_use and "OPENAI_API_KEY" in st.secrets:
+                api_key_to_use = st.secrets["OPENAI_API_KEY"]
+        except Exception:
+            pass
+            
+        if not api_key_to_use:
+            raise ValueError("OPENAI_API_KEY is strictly required. Set it via env variable or Streamlit Secrets!")
+            
+        self.client = OpenAI(api_key=api_key_to_use)
         self.fast_model = "gpt-4o-mini"
         self.reasoning_model = "gpt-4o"
 

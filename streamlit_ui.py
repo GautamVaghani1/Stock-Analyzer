@@ -82,9 +82,14 @@ if not OPENAI_AVAILABLE:
     st.error("🚨 OpenAI library is not installed. Please run `pip install openai` in your terminal.")
     st.stop()
     
-if not OPENAI_API_KEY:
-    st.warning("⚠️ OPENAI_API_KEY is not set in `new.py`. You must set it before running the scan.")
-    st.stop()
+try:
+    if not OPENAI_API_KEY and "OPENAI_API_KEY" not in st.secrets:
+        st.warning("⚠️ OPENAI_API_KEY is not set. You must add it to your Streamlit secrets.")
+        st.stop()
+except Exception:
+    if not OPENAI_API_KEY:
+        st.warning("⚠️ OPENAI_API_KEY is not set.")
+        st.stop()
 
 # Layout
 col1, col2, col3 = st.columns([1, 2, 1])
