@@ -103,9 +103,8 @@ class AgenticFinancialAnalyzer:
             if market == "US" and '.' in sym: continue
                 
             try:
-                # The ultimate zero-error check
-                info = yf.Ticker(sym).info
-                if info.get("currentPrice") or info.get("regularMarketPrice") or info.get("previousClose"):
+                # Built-in fast check bypassing heavy .info 429 blockades
+                if not yf.Ticker(sym).history(period="5d").empty:
                     return sym
             except Exception:
                 continue
@@ -114,8 +113,7 @@ class AgenticFinancialAnalyzer:
         for sym in candidates:
             if not sym: continue
             try:
-                info = yf.Ticker(sym).info
-                if info.get("currentPrice") or info.get("regularMarketPrice") or info.get("previousClose"):
+                if not yf.Ticker(sym).history(period="5d").empty:
                     return sym
             except Exception:
                 continue
@@ -353,19 +351,24 @@ class AgenticFinancialAnalyzer:
                 end = idx_hist.iloc[-1]["Close"]
                 index_trend_pct = round(((end - start) / start) * 100, 2)
                 
-            # 2. Company Info (Sector / Pricing)
-            stock_info = yf.Ticker(ticker).info
-            curr_price = stock_info.get("currentPrice", 0)
-            high_52 = stock_info.get("fiftyTwoWeekHigh", 0)
-            low_52 = stock_info.get("fiftyTwoWeekLow", 0)
-            sector = stock_info.get("sector", "Unknown Sector")
-            industry = stock_info.get("industry", "Unknown Industry")
+            # 2. Company Info (Pricing calculated via history to bypass heavy .info 429 blocks)
+            curr_price = 0
+            high_52 = 0
+            low_52 = 0
+            try:
+                hist_1y = yf.Ticker(ticker).history(period="1y")
+                if not hist_1y.empty:
+                    curr_price = round(float(hist_1y.iloc[-1]["Close"]), 2)
+                    high_52 = round(float(hist_1y["High"].max()), 2)
+                    low_52 = round(float(hist_1y["Low"].min()), 2)
+            except Exception:
+                pass
             
             return {
                 "index_ticker": index_ticker,
                 "overall_market_1mo_trend_pct": index_trend_pct,
-                "stock_sector": sector,
-                "stock_industry": industry,
+                "stock_sector": "General Market",
+                "stock_industry": "General Industry",
                 "current_price": curr_price,
                 "fifty_two_week_high": high_52,
                 "fifty_two_week_low": low_52
