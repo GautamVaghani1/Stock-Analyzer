@@ -4,7 +4,6 @@ import urllib.request
 import urllib.parse
 from datetime import datetime, timedelta
 import pandas as pd
-import yfinance as yf
 import xml.etree.ElementTree as ET
 import time
 import requests
@@ -40,6 +39,43 @@ class AgenticFinancialAnalyzer:
         self.client = OpenAI(api_key=api_key_to_use)
         self.fast_model = "gpt-4o-mini"
         self.reasoning_model = "gpt-4o"
+        # Shared browser-impersonating session for Yahoo Chart API
+        self._yf_session = requests.Session()
+        self._yf_session.headers.update({
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
+            "Accept": "application/json",
+            "Referer": "https://finance.yahoo.com"
+        })
+
+    # ==========================================================================
+    # YAHOO CHART API FETCHER (bypasses yfinance block on Cloud)
+    # ==========================================================================
+    def _fetch_yahoo_chart(self, ticker, range_str="2y", interval="1d"):
+        """Directly fetches OHLCV data from Yahoo Finance's chart API without yfinance."""
+        url = (
+            f"https://query1.finance.yahoo.com/v8/finance/chart/{urllib.parse.quote(ticker)}"
+            f"?range={range_str}&interval={interval}&includeAdjustedClose=true"
+        )
+        try:
+            r = self._yf_session.get(url, timeout=10)
+            data = r.json()
+            result = data.get("chart", {}).get("result", [])
+            if not result:
+                return pd.DataFrame()
+            res = result[0]
+            timestamps = res.get("timestamp", [])
+            ohlcv = res.get("indicators", {}).get("quote", [{}])[0]
+            closes = ohlcv.get("close", [])
+            highs  = ohlcv.get("high", [])
+            lows   = ohlcv.get("low", [])
+            vols   = ohlcv.get("volume", [])
+            dates  = [datetime.utcfromtimestamp(t).date() for t in timestamps]
+            df = pd.DataFrame({"Close": closes, "High": highs, "Low": lows, "Volume": vols}, index=dates)
+            df = df.dropna(subset=["Close"])
+            return df
+        except Exception as e:
+            print(f"     ⚠️  Chart API failed for {ticker}: {e}")
+            return pd.DataFrame()
 
     # ==========================================================================
     # PHASE 1: Real-time News (Agent 1)
@@ -224,12 +260,11 @@ class AgenticFinancialAnalyzer:
     def calculate_market_metrics(self, ticker, event_objects):
         """Calculates 1-Month Baseline (Excluding T-1/T-2), T-1/T-2 hype, and True Post-News movement."""
         print(f"[Agent 4/5] 📈 Calculating percentage deviations (Excluding T-1, T-2) for {ticker}...")
-        time.sleep(1) # Strict Yahoo Rate Limit Evasion
-        stock = yf.Ticker(ticker)
-        hist = stock.history(period="2y")
+        
+        hist = self._fetch_yahoo_chart(ticker, range_str="2y")
         if hist.empty: return []
             
-        hist.index = hist.index.tz_localize(None)
+        hist.index = pd.to_datetime(hist.index)
         results = []
         
         for item in event_objects:
@@ -238,11 +273,11 @@ class AgenticFinancialAnalyzer:
             
             try:
                 d = pd.to_datetime(d_str).date()
-                future_dates = hist.index[hist.index.date >= d]
-                if len(future_dates) < 2: continue # Ensure we have T+1
+                future_dates = [i for i in hist.index if i.date() >= d]
+                if len(future_dates) < 2: continue
                     
-                t0_idx = hist.index.get_loc(future_dates[0])
-                if t0_idx < 23: continue # Ensure 1-month baseline exists
+                t0_idx = list(hist.index).index(future_dates[0])
+                if t0_idx < 23: continue
                     
                 t0_close = hist.iloc[t0_idx]["Close"]
                 
@@ -283,9 +318,7 @@ class AgenticFinancialAnalyzer:
         """Calculates the Pre-Event hype (T-1 & T-2) and 1-month baseline ending right now."""
         print(f"[Agent 4/5] ⏱️  Calculating Current Market T-1/T-2 hype for {ticker}...")
         try:
-            time.sleep(1)
-            stock = yf.Ticker(ticker)
-            hist = stock.history(period="3mo")
+            hist = self._fetch_yahoo_chart(ticker, range_str="3mo")
             if len(hist) < 25: return {}
                 
             # T-0 is the final row [-1] (Today)
@@ -317,28 +350,23 @@ class AgenticFinancialAnalyzer:
         index_ticker = "^GSPC" if market == "US" else "^NSEI"
         
         try:
-            # 1. Broad Market Trend
-            time.sleep(1)
-            idx_hist = yf.Ticker(index_ticker).history(period="1mo")
+            # 1. Broad Market Trend via chart API
+            idx_hist = self._fetch_yahoo_chart(index_ticker, range_str="1mo")
             index_trend_pct = 0
             if not idx_hist.empty:
-                start = idx_hist.iloc[0]["Close"]
-                end = idx_hist.iloc[-1]["Close"]
+                start = float(idx_hist.iloc[0]["Close"])
+                end = float(idx_hist.iloc[-1]["Close"])
                 index_trend_pct = round(((end - start) / start) * 100, 2)
                 
-            # 2. Company Info
+            # 2. Stock price via chart API
             curr_price = 0
             high_52 = 0
             low_52 = 0
-            try:
-                time.sleep(1)
-                hist_1y = yf.Ticker(ticker).history(period="1y")
-                if not hist_1y.empty:
-                    curr_price = round(float(hist_1y.iloc[-1]["Close"]), 2)
-                    high_52 = round(float(hist_1y["High"].max()), 2)
-                    low_52 = round(float(hist_1y["Low"].min()), 2)
-            except Exception:
-                pass
+            hist_1y = self._fetch_yahoo_chart(ticker, range_str="1y")
+            if not hist_1y.empty:
+                curr_price = round(float(hist_1y.iloc[-1]["Close"]), 2)
+                high_52 = round(float(hist_1y["High"].max()), 2)
+                low_52 = round(float(hist_1y["Low"].min()), 2)
             
             return {
                 "index_ticker": index_ticker,
